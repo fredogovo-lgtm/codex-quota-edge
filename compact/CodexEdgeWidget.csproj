@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+ <PropertyGroup>
+  <OutputType>WinExe</OutputType><TargetFramework>net8.0-windows</TargetFramework><UseWPF>true</UseWPF>
+  <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><AssemblyName>CodexUsageWidget</AssemblyName><RootNamespace>CodexEdgeWidget</RootNamespace>
+  <ApplicationManifest>app.manifest</ApplicationManifest><Version>2.2.1</Version><PublishTrimmed>false</PublishTrimmed><EnableCompressionInSingleFile>true</EnableCompressionInSingleFile><DebugType Condition="'$(Configuration)'=='Release'">none</DebugType><DebugSymbols Condition="'$(Configuration)'=='Release'">false</DebugSymbols>
+  <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+ </PropertyGroup>
+ <ItemGroup><Compile Include="*.cs"/><Compile Include="Upstream/QuotaClient.cs"/></ItemGroup>
+</Project>

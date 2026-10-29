@@ -1,0 +1,13 @@
+**/bin/
+**/obj/
+.vs/
+work/
+outputs/
+*.user
+*.suo
+*.zip
+*.exe
+.codex-usage-widget/
+auth.json
+.env
+.env.*

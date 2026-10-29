@@ -1,0 +1,12 @@
+{
+  "Version": "2.2.1",
+  "ExecutableSHA256": "31c7c2fb92e5c88228d3b030b200a2cbcbe16e77185d564dc15f256d1baa1fb0",
+  "Architecture": "win-x64",
+  "Runtime": "Microsoft.NETCore.App + Microsoft.WindowsDesktop.App 8.0.33, self-contained compressed single file",
+  "Upstream": "https://github.com/qeretycs-tech/codex-usage-widget",
+  "UpstreamVersion": "v1.8.0",
+  "SourceCommit": "03c2285e73f64c440c506078a93d0d27666762bb",
+  "UpstreamZipSHA256": "e936e427a208582394591d5e8e142bd8fc1146802e68b94a36cf27bc5d4938bd",
+  "Changes": "Native compact WPF UI; quota-only client; three styles; four-edge drag/snap and persistent lock; consoleless host; independent current-user scheduled task and recovery",
+  "BuiltAt": "2026-10-29T18:11:43.0567953+08:00"
+}
