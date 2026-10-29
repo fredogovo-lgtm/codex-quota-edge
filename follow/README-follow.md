@@ -24,4 +24,4 @@ Windows10/11 x64，已安装并登录Codex，需要Windows PowerShell5.1、Windo
 
 独立桌面伴随组件，通过本机Codex CLI只读查询额度，不修改Codex或登录资料，不保存额度响应原文。额度读取源于qeretycs-tech/codex-usage-widget v1.8.0（MIT），详见LICENSE、THIRD_PARTY_NOTICES.md与UPSTREAM.json。
 
-源码在compact/和follow/。回退前先用本版Disable-Follow.vbs停用，再运行旧包入口。--demo显示明确示例数据，--preview用于额度验收。
+源码在compact/和source/follow/；旧安装备份及发布包保留。回退前先用本版Disable-Follow.vbs停用，再运行旧包入口。--demo显示明确示例数据，--preview用于额度验收。

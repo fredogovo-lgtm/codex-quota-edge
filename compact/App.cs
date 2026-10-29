@@ -6,7 +6,7 @@ internal static class App {
   bool demo=args.Contains("--demo"),preview=args.Contains("--preview");
   string suffix=demo||preview?"-Preview":"";
   using var mutex=new Mutex(true,"Local\\CodexUsageWidget-87D45B32-BCF8-44E5-8F9B-36E9BB488F4F"+suffix,out bool created);
-  if(!created)return;
+  if(!created){WindowRecovery.NotifyExisting(demo||preview);return;}
   string settings=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),".codex-usage-widget",demo||preview?"preview-settings.json":"edge-settings.json");
   int index=Array.IndexOf(args,"--settings-path");if(index>=0&&index+1<args.Length)settings=args[index+1];
   var preferences=new PreferenceStore(settings);

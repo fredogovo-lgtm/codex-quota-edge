@@ -26,6 +26,46 @@ Check("click cycles ring line vertical ring",()=>{
 });
 var temp=Path.Combine(Path.GetTempPath(),"CodexEdgeTests-"+Guid.NewGuid().ToString("N")); Directory.CreateDirectory(temp);
 try {
+ Check("style save writes default topmost for legacy settings",()=>{
+  var path=Path.Combine(temp,"topmost-legacy-save.json");File.WriteAllText(path,"{\"style\":\"line\"}");
+  Eq(true,new PreferenceStore(path).Save(DisplayStyle.Vertical));
+  using var json=System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));Eq(true,json.RootElement.GetProperty("topmost").GetBoolean());
+ });
+ Check("missing corrupt legacy and nonboolean topmost default enabled",()=>{
+  var path=Path.Combine(temp,"topmost-defaults.json");Eq(true,new PreferenceStore(path).LoadTopmost());
+  foreach(var content in new[]{"broken","[]","null","123","{}","{\"style\":\"line\"}","{\"topmost\":null}","{\"topmost\":1}","{\"topmost\":\"false\"}"}) {
+   File.WriteAllText(path,content);Eq(true,new PreferenceStore(path).LoadTopmost());
+  }
+ });
+ Check("topmost choice persists across new store and preserves style dock lock",()=>{
+  var path=Path.Combine(temp,"topmost-roundtrip.json");var store=new PreferenceStore(path);
+  Eq(true,store.Save(DisplayStyle.Vertical));Eq(true,store.SaveDock(new(new(DockEdge.Bottom,.23,"display-2"),true)));
+  foreach(var enabled in new[]{false,true,false}) {
+   Eq(true,store.SaveTopmost(enabled));var reopened=new PreferenceStore(path);Eq(enabled,reopened.LoadTopmost());
+   Eq(DisplayStyle.Vertical,reopened.Load());Eq(new DockPreferences(new(DockEdge.Bottom,.23,"display-2"),true),reopened.LoadDock());
+   using var json=System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));Eq(enabled,json.RootElement.GetProperty("topmost").GetBoolean());
+  }
+ });
+ Check("style changes and close saves preserve disabled topmost",()=>{
+  var path=Path.Combine(temp,"topmost-style-save.json");var store=new PreferenceStore(path);Eq(true,store.SaveTopmost(false));
+  foreach(var style in Enum.GetValues<DisplayStyle>()){Eq(true,store.Save(style));Eq(false,new PreferenceStore(path).LoadTopmost());}
+ });
+ Check("dock moves and lock changes preserve disabled topmost",()=>{
+  var path=Path.Combine(temp,"topmost-dock-save.json");var store=new PreferenceStore(path);Eq(true,store.SaveTopmost(false));
+  foreach(var edge in Enum.GetValues<DockEdge>())foreach(var locked in new[]{false,true}) {
+   Eq(true,store.SaveDock(new(new(edge,.71,"display-1"),locked)));Eq(false,new PreferenceStore(path).LoadTopmost());
+  }
+ });
+ Check("failed topmost write returns false and leaves no temporary files",()=>{
+  var dir=Path.Combine(temp,"topmost-write-failure");Directory.CreateDirectory(dir);var blocker=Path.Combine(dir,"file");File.WriteAllText(blocker,"x");
+  Eq(false,new PreferenceStore(Path.Combine(blocker,"settings.json")).SaveTopmost(false));Eq(0,Directory.GetFiles(dir,"*.tmp").Length);
+ });
+ Check("migration keeps selected legacy topmost without overwriting an existing target",()=>{
+  var dir=Path.Combine(temp,"topmost-migration");Directory.CreateDirectory(dir);var source=Path.Combine(dir,"source.json");
+  File.WriteAllText(source,"{\"style\":\"vertical\",\"topmost\":false}");var target=Path.Combine(dir,"target.json");var store=new PreferenceStore(target);
+  Eq(true,store.MigrateLegacy(new[]{source}));Eq(false,store.LoadTopmost());Eq(DisplayStyle.Vertical,store.Load());
+  Eq(true,store.SaveTopmost(true));Eq(false,store.MigrateLegacy(new[]{source}));Eq(true,store.LoadTopmost());
+ });
  foreach(var name in new[]{"Ring","Line","Vertical"}) {
   Check(name+" style persists across new store at restart",()=>{
    var style=Enum.Parse<DisplayStyle>(name);var path=Path.Combine(temp,name+"-settings.json");
@@ -59,7 +99,7 @@ try {
   Check("legacy "+style+" style migrates once to shared settings",()=>{
    var source=Path.Combine(temp,"migrate-source-"+style+".json");var target=Path.Combine(temp,"migrated-"+style,"edge-settings.json");
    new PreferenceStore(source).Save(style);var original=File.ReadAllText(source);
-   Eq(true,new PreferenceStore(target).MigrateLegacy(new[]{source}));Eq(style,new PreferenceStore(target).Load());Eq(original,File.ReadAllText(source));
+   Eq(true,new PreferenceStore(target).MigrateLegacy(new[]{source}));Eq(style,new PreferenceStore(target).Load());Eq(true,new PreferenceStore(target).LoadTopmost());Eq(original,File.ReadAllText(source));
    Eq(false,new PreferenceStore(target).MigrateLegacy(new[]{source}));
   });
  }

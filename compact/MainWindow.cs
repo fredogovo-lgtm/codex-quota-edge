@@ -11,13 +11,13 @@ public sealed class MainWindow : Window {
  private readonly CancellationTokenSource lifetime=new();private readonly DispatcherTimer clock=new(){Interval=TimeSpan.FromSeconds(1)};
  private readonly DispatcherTimer collapse=new(){Interval=TimeSpan.FromMilliseconds(240)};
  private readonly NativeDock dock;private readonly Grid details=new();private readonly Gauge[] gauges;private readonly VerticalBars verticalBars;
- private readonly TextBlock[] values=new TextBlock[3];private QuotaData? data;private Task? refresh;private DateTimeOffset nextRefresh;
- private bool shuttingDown,allowClose,pointerDown,positionLocked;private readonly bool demo;
- private readonly Grid layout,column;private readonly Border border;private readonly MenuItem lockItem;
+ private readonly TextBlock[] values=new TextBlock[3];private QuotaData? data;private Task? refresh;private DateTimeOffset nextRefresh,nextVisibilityCheck;
+ private bool shuttingDown,allowClose,pointerDown,positionLocked,topmostEnabled;private readonly bool demo;
+ private readonly Grid layout,column;private readonly Border border;private readonly MenuItem lockItem,topmostItem;
  public MainWindow(IQuotaClient client,PreferenceStore preferences,bool demo=false,bool preview=false) {
-  this.client=client;this.preferences=preferences;this.demo=demo;style=preferences.Load();
+  this.client=client;this.preferences=preferences;this.demo=demo;style=preferences.Load();topmostEnabled=preferences.LoadTopmost();
   Title="Codex 用量悬浮窗";Width=26;Height=84;WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.NoResize;
-  AllowsTransparency=true;Background=Brushes.Transparent;Topmost=true;ShowInTaskbar=demo||preview;ShowActivated=false;
+  AllowsTransparency=true;Background=Brushes.Transparent;Topmost=topmostEnabled;ShowInTaskbar=demo||preview;ShowActivated=false;
   WindowStartupLocation=WindowStartupLocation.Manual;Left=SystemParameters.WorkArea.Right-26;Top=SystemParameters.WorkArea.Top+(SystemParameters.WorkArea.Height-84)/2;
   var background=new LinearGradientBrush(Color.FromRgb(43,47,53),Color.FromRgb(29,32,36),90);
   border=new Border{Background=background,BorderBrush=new SolidColorBrush(Color.FromRgb(77,83,91)),BorderThickness=new Thickness(1,1,0,1),CornerRadius=new CornerRadius(13,0,0,13),ClipToBounds=true};
@@ -38,9 +38,9 @@ public sealed class MainWindow : Window {
   }
   verticalBars=new VerticalBars(colors){Width=18,Height=66,HorizontalAlignment=HorizontalAlignment.Center,VerticalAlignment=VerticalAlignment.Center,Visibility=Visibility.Collapsed};
   Grid.SetRowSpan(verticalBars,3);column.Children.Add(verticalBars);
-  border.Child=layout;Content=border;details.Visibility=Visibility.Collapsed;dock=new NativeDock(this,demo||preview);
+  border.Child=layout;Content=border;details.Visibility=Visibility.Collapsed;dock=new NativeDock(this,demo||preview){TopmostEnabled=topmostEnabled};
   var savedDock=preferences.LoadDock();dock.Position=savedDock.Position;positionLocked=savedDock.Locked;
-  dock.LayoutChanged+=UpdateDockLayout;dock.PositionChanged+=_=>SaveDock();
+  dock.RecoveryRequested+=MaintainVisibility;dock.LayoutChanged+=UpdateDockLayout;dock.PositionChanged+=_=>SaveDock();
   dock.DragStarted+=()=>{collapse.Stop();details.Visibility=Visibility.Collapsed;UpdateDockLayout();};
   SourceInitialized+=(_,_)=>dock.Attach();Loaded+=(_,_)=>{if(preview)SetExpanded(true);Render();StartRefresh();clock.Start();};
   MouseEnter+=(_,_)=>{collapse.Stop();if(!pointerDown)SetExpanded(true);};MouseLeave+=(_,_)=>{if(!pointerDown)collapse.Start();};
@@ -51,9 +51,20 @@ public sealed class MainWindow : Window {
   LostMouseCapture+=(_,_)=>{if(pointerDown){pointerDown=false;dock.EndPointer();if(!IsMouseOver)collapse.Start();}};
   lockItem=new MenuItem{Header=positionLocked?"解除锁定位置":"锁定位置"};
   lockItem.Click+=(_,_)=>{positionLocked=!positionLocked;lockItem.Header=positionLocked?"解除锁定位置":"锁定位置";SaveDock();Render();};
-  var exit=new MenuItem{Header="退出"};exit.Click+=(_,_)=>Close();ContextMenu=new ContextMenu();ContextMenu.Items.Add(lockItem);ContextMenu.Items.Add(new Separator());ContextMenu.Items.Add(exit);
+  var exit=new MenuItem{Header="退出"};exit.Click+=(_,_)=>Close();ContextMenu=new ContextMenu();ContextMenu.Items.Add(lockItem);
+  topmostItem=new MenuItem{Header=topmostEnabled?"取消置顶":"置顶显示",IsCheckable=true,IsChecked=topmostEnabled};
+  topmostItem.Click+=(_,_)=>{topmostEnabled=!topmostEnabled;topmostItem.IsChecked=topmostEnabled;topmostItem.Header=topmostEnabled?"取消置顶":"置顶显示";preferences.SaveTopmost(topmostEnabled);Topmost=topmostEnabled;dock.TopmostEnabled=topmostEnabled;dock.Place();};
+  ContextMenu.Items.Add(topmostItem);ContextMenu.Items.Add(new Separator());ContextMenu.Items.Add(exit);
   ContextMenu.Closed+=(_,_)=>{if(!IsMouseOver)collapse.Start();};
-  clock.Tick+=(_,_)=>{Render();if(DateTimeOffset.UtcNow>=nextRefresh)StartRefresh();};Closing+=OnClosing;
+  clock.Tick+=(_,_)=>{Render();if(DateTimeOffset.UtcNow>=nextVisibilityCheck){nextVisibilityCheck=DateTimeOffset.UtcNow.AddSeconds(3);MaintainVisibility();}if(DateTimeOffset.UtcNow>=nextRefresh)StartRefresh();};Closing+=OnClosing;
+ }
+ private void MaintainVisibility() {
+  if(shuttingDown||!topmostEnabled||pointerDown||dock.IsDragging||ContextMenu?.IsOpen==true)return;
+  dock.MaintainVisibility();
+ }
+ public void RestorePanel() {
+  if(shuttingDown||pointerDown||dock.IsDragging||ContextMenu?.IsOpen==true)return;
+  dock.RestorePanel();
  }
  private void SetExpanded(bool expanded) {dock.Expanded=expanded;details.Visibility=expanded?Visibility.Visible:Visibility.Collapsed;dock.Place();}
  private void SaveDock()=>preferences.SaveDock(new(dock.Position,positionLocked));
@@ -104,7 +115,7 @@ public sealed class MainWindow : Window {
   AutomationProperties.SetName(this,name);AutomationProperties.SetHelpText(this,(demo?"演示数据。":"")+"青绿：5小时余额；琥珀：重置倒计时；蓝色：本周余额。单击切换样式，悬停看详情。"+(positionLocked?"位置已锁定，右键解除。":"拖动贴到屏幕四边，右键锁定位置。"));
  }
  private async void OnClosing(object? sender,CancelEventArgs e) {
-  if(allowClose)return;e.Cancel=true;if(shuttingDown)return;shuttingDown=true;if(pointerDown){pointerDown=false;dock.EndPointer();ReleaseMouseCapture();}SaveDock();preferences.Save(style);clock.Stop();collapse.Stop();lifetime.Cancel();
+  if(allowClose)return;e.Cancel=true;if(shuttingDown)return;shuttingDown=true;if(pointerDown){pointerDown=false;dock.EndPointer();ReleaseMouseCapture();}SaveDock();preferences.Save(style);preferences.SaveTopmost(topmostEnabled);clock.Stop();collapse.Stop();lifetime.Cancel();
   try {if(refresh!=null)await refresh;await client.DisposeAsync();}
   catch { /* A failed child-process cleanup must not crash the dispatcher on exit. */ }
   finally {lifetime.Dispose();allowClose=true;_ = Dispatcher.BeginInvoke(new Action(Close));}

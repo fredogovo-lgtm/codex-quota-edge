@@ -4,8 +4,10 @@ using System.Windows.Interop;
 using System.Windows.Media;
 namespace CodexEdgeWidget;
 internal sealed class NativeDock(Window window,bool preview=false) {
- private nint hwnd;private POINT pressed;private int offsetX,offsetY;private bool candidate,dragHorizontal;
+ private nint hwnd,foregroundHook;private WinEventProc? foregroundCallback;private GCHandle callbackRoot;private bool recoveryQueued,closed;private POINT pressed;private int offsetX,offsetY;private bool candidate,dragHorizontal;
  public bool Expanded {get;set;}
+ public bool TopmostEnabled {get;set;}=true;
+ public event Action? RecoveryRequested;
  public bool IsDragging {get;private set;}
  public bool DetailsOnRight {get;private set;}
  public double GaugeOffset {get;private set;}
@@ -17,14 +19,22 @@ internal sealed class NativeDock(Window window,bool preview=false) {
   hwnd=new WindowInteropHelper(window).Handle;
   long ex=GetWindowLongPtr(hwnd,-20).ToInt64();SetWindowLongPtr(hwnd,-20,(nint)(preview ? (ex&~0x80)|0x40000|0x08000000 : ex|0x80|0x08000000));
   HwndSource.FromHwnd(hwnd)?.AddHook(Hook);Place();
+  // Out-of-context foreground notifications do not inject code or intercept input.
+  foregroundCallback=(_,_,_,_,_,_,_)=> {
+   if(closed||!TopmostEnabled||recoveryQueued||window.Dispatcher.HasShutdownStarted)return;
+   recoveryQueued=true;window.Dispatcher.BeginInvoke(new Action(()=>{recoveryQueued=false;if(!closed)RecoveryRequested?.Invoke();}));
+  };
+  callbackRoot=GCHandle.Alloc(foregroundCallback);foregroundHook=SetWinEventHook(3,3,0,foregroundCallback,0,0,2);
+  window.Closed+=(_,_)=>{closed=true;hwnd=0;if(foregroundHook!=0){UnhookWinEvent(foregroundHook);foregroundHook=0;}if(callbackRoot.IsAllocated)callbackRoot.Free();};
  }
  private nint Hook(nint h,int msg,nint w,nint l,ref bool handled) {
+  if(msg>=0xC000&&msg==WindowRecovery.GetRestoreMessage(preview)){handled=true;if(window is MainWindow main)window.Dispatcher.BeginInvoke(main.RestorePanel);return 0;}
   if(msg==0x21){handled=true;return 3;} // MA_NOACTIVATE: retain focus in the user's editor.
   if(msg is 0x2E0 or 0x7E or 0x1A)window.Dispatcher.BeginInvoke(Place);
   return 0;
  }
  public void Place() {
-  if(hwnd==0||IsDragging)return;
+  if(closed||hwnd==0||IsDragging)return;
   var monitor=FindMonitor();var info=Info(monitor);if(info is null)return;
   double scale=Scale(monitor);var placement=DockGeometry.Calculate(Work(info.Value),scale,Position,Expanded);
   GaugeOffset=placement.GaugeOffsetX/scale;DetailsOnRight=placement.DetailsOnRight;LayoutChanged?.Invoke();Move(placement.Bounds);
@@ -57,7 +67,21 @@ internal sealed class NativeDock(Window window,bool preview=false) {
   }
   return dragged;
  }
- private void Move(DockBounds b)=>SetWindowPos(hwnd,(nint)(-1),b.X,b.Y,b.Width,b.Height,0x10|0x40);
+ private void Move(DockBounds b)=>SetWindowPos(hwnd,(nint)(TopmostEnabled?-1:-2),b.X,b.Y,b.Width,b.Height,0x10|0x40);
+ public void MaintainVisibility() {
+  if(!TopmostEnabled||closed||hwnd==0||IsDragging||IsCloaked())return;
+  RestorePanel();
+ }
+ public void RestorePanel() {
+  if(closed||hwnd==0||IsDragging||IsCloaked())return;
+  if(!window.IsVisible)window.Show();
+  if(window.WindowState!=WindowState.Normal){window.WindowState=WindowState.Normal;Place();}
+  const uint flags=0x1|0x2|0x10|0x200; // Keep size, position, focus, and owner order.
+  // Reset both the effective Z order and stale native topmost state, not only WPF's cached flag.
+  if(TopmostEnabled)SetWindowPos(hwnd,(nint)(-2),0,0,0,0,flags);
+  SetWindowPos(hwnd,(nint)(TopmostEnabled?-1:-2),0,0,0,0,flags|0x40);
+ }
+ private bool IsCloaked()=>DwmGetWindowAttribute(hwnd,14,out int cloaked,sizeof(int))==0&&cloaked!=0;
  private nint FindMonitor() {
   nint found=0;
   if(!string.IsNullOrEmpty(Position.Monitor)) {
@@ -72,6 +96,10 @@ internal sealed class NativeDock(Window window,bool preview=false) {
  }
  private static DockBounds Work(MONITORINFO info)=>new(info.work.left,info.work.top,info.work.right-info.work.left,info.work.bottom-info.work.top);
  private static MONITORINFO? Info(nint monitor){var info=new MONITORINFO{size=Marshal.SizeOf<MONITORINFO>(),device=""};return GetMonitorInfo(monitor,ref info)?info:null;}
+ private delegate void WinEventProc(nint hook,uint eventType,nint window,int objectId,int childId,uint threadId,uint time);
+ [DllImport("user32.dll")]private static extern nint SetWinEventHook(uint min,uint max,nint module,WinEventProc callback,uint process,uint thread,uint flags);
+ [DllImport("user32.dll")]private static extern bool UnhookWinEvent(nint hook);
+ [DllImport("dwmapi.dll")]private static extern int DwmGetWindowAttribute(nint window,int attribute,out int value,int size);
  [StructLayout(LayoutKind.Sequential)]private struct POINT {public int x,y;}
  [StructLayout(LayoutKind.Sequential)]private struct RECT {public int left,top,right,bottom;}
  [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)]private struct MONITORINFO {public int size;public RECT monitor,work;public uint flags;[MarshalAs(UnmanagedType.ByValTStr,SizeConst=32)]public string device;}

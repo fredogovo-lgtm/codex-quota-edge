@@ -20,6 +20,14 @@ public static class QuotaDisplay {
 }
 public sealed class PreferenceStore(string path) {
  public DisplayStyle Load() => TryReadStyle(path,out var style) ? style : DisplayStyle.Ring;
+ public bool LoadTopmost()=>ReadTopmost(path);
+ private static bool ReadTopmost(string source) {
+  try {
+   using var json=JsonDocument.Parse(File.ReadAllText(source));var root=json.RootElement;
+   if(root.ValueKind==JsonValueKind.Object&&root.TryGetProperty("topmost",out var value)&&value.ValueKind is JsonValueKind.True or JsonValueKind.False)return value.GetBoolean();
+  }catch(Exception e) when(e is IOException or UnauthorizedAccessException or JsonException or ArgumentException or NotSupportedException){}
+  return true;
+ }
  public DockPreferences LoadDock() {
   try {
    using var json=JsonDocument.Parse(File.ReadAllText(path));var root=json.RootElement;
@@ -35,15 +43,15 @@ public sealed class PreferenceStore(string path) {
  }
  public bool MigrateLegacy(IEnumerable<string> paths) {
   if(File.Exists(path)||Directory.Exists(path))return false;
-  DisplayStyle? selected=null;DateTime latest=DateTime.MinValue;
+  DisplayStyle? selected=null;bool selectedTopmost=true;DateTime latest=DateTime.MinValue;
   foreach(var candidate in paths) {
    if(!TryReadStyle(candidate,out var style))continue;
    try {
     var written=File.GetLastWriteTimeUtc(candidate);
-    if(selected is null||written>latest){latest=written;selected=style;}
+    if(selected is null||written>latest){latest=written;selected=style;selectedTopmost=ReadTopmost(candidate);}
    } catch(Exception e) when(e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { }
   }
-  return selected is {} value && Save(value,false);
+  return selected is {} value && Write(value,LoadDock(),selectedTopmost,false);
  }
  private static bool TryReadStyle(string source,out DisplayStyle style) {
   style=DisplayStyle.Ring;
@@ -59,13 +67,14 @@ public sealed class PreferenceStore(string path) {
   } catch(Exception e) when(e is IOException or UnauthorizedAccessException or JsonException or ArgumentException or NotSupportedException) {return false;}
  }
  public bool Save(DisplayStyle style) => Save(style,true);
- public bool SaveDock(DockPreferences dock)=>Write(Load(),new(DockGeometry.Normalize(dock.Position),dock.Locked),true);
- private bool Save(DisplayStyle style,bool overwrite)=>Write(style,LoadDock(),overwrite);
- private bool Write(DisplayStyle style,DockPreferences dock,bool overwrite) {
+ public bool SaveDock(DockPreferences dock)=>Write(Load(),new(DockGeometry.Normalize(dock.Position),dock.Locked),LoadTopmost(),true);
+ public bool SaveTopmost(bool topmost)=>Write(Load(),LoadDock(),topmost,true);
+ private bool Save(DisplayStyle style,bool overwrite)=>Write(style,LoadDock(),LoadTopmost(),overwrite);
+ private bool Write(DisplayStyle style,DockPreferences dock,bool topmost,bool overwrite) {
   string? temp=null;
   try { var full=Path.GetFullPath(path);Directory.CreateDirectory(Path.GetDirectoryName(full)!);
    temp=full+"."+Guid.NewGuid().ToString("N")+".tmp";
-   File.WriteAllText(temp,JsonSerializer.Serialize(new{style=style switch { DisplayStyle.Line=>"line", DisplayStyle.Vertical=>"vertical", _=>"ring" },dock=new{edge=dock.Position.Edge.ToString().ToLowerInvariant(),fraction=dock.Position.Fraction,monitor=dock.Position.Monitor,locked=dock.Locked}}));
+   File.WriteAllText(temp,JsonSerializer.Serialize(new{style=style switch { DisplayStyle.Line=>"line", DisplayStyle.Vertical=>"vertical", _=>"ring" },dock=new{edge=dock.Position.Edge.ToString().ToLowerInvariant(),fraction=dock.Position.Fraction,monitor=dock.Position.Monitor,locked=dock.Locked},topmost}));
    File.Move(temp,full,overwrite); return true;
   } catch(Exception e) when(e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) {return false;}
   finally {try{if(temp!=null&&File.Exists(temp))File.Delete(temp);}catch(IOException){}catch(UnauthorizedAccessException){}}
